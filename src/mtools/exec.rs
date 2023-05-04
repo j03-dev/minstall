@@ -1,5 +1,13 @@
 use std::{process::Command, str::from_utf8};
 
+use std::env;
+use std::path::Path;
+
+pub fn chdir(path: &str) -> bool {
+    let root = Path::new(path);
+    env::set_current_dir(&root).is_ok()
+}
+
 pub fn prepare(cmd: &str) -> (&str, Vec<&str>) {
     let list_cmd = cmd
         .split(" ")
@@ -15,23 +23,28 @@ pub fn prepare(cmd: &str) -> (&str, Vec<&str>) {
 pub fn run_command(cmd: &str) -> Result<(), ()> {
     let (command, arguments) = prepare(cmd);
     println!("{} {}", command, arguments.join(" "));
-    match Command::new(command).args(arguments).output() {
-        Ok(output) => {
-            let state = output.status.code().unwrap();
-            let result: &str;
-            let response = match state {
-                0 => {
-                    result = from_utf8(&output.stdout).unwrap();
-                    Ok(())
-                }
-                _ => {
-                    result = from_utf8(&output.stderr).unwrap();
-                    Err(())
-                }
-            };
-            println!("{result}");
-            response
+    if command == "cd" {
+        chdir(arguments[0]);
+        Ok(())
+    } else {
+        match Command::new(command).args(arguments).output() {
+            Ok(output) => {
+                let state = output.status.code().unwrap();
+                let result: &str;
+                let response = match state {
+                    0 => {
+                        result = from_utf8(&output.stdout).unwrap();
+                        Ok(())
+                    }
+                    _ => {
+                        result = from_utf8(&output.stderr).unwrap();
+                        Err(())
+                    }
+                };
+                println!("{result}");
+                response
+            }
+            Err(_) => Err(()),
         }
-        Err(_) => Err(()),
     }
 }

@@ -1,20 +1,28 @@
-
-use std::process::exit;
+// use std::process::exit;
 
 use scraper::Html;
 
-use crate::mtools::{exec::run_command, parse::parser, scrape, downloader::download_package};
+use crate::mtools::{downloader::download_package, exec::run_command, parse::parser, scrape};
 
 mod mtools;
 
-static LINUX_FROM_SCRATCH: &str = "https://www.linuxfromscratch.org/blfs/view/9.1/";
+static LINUX_FROM_SCRATCH: &str = "https://www.linuxfromscratch.org/blfs/view/svn/";
 static HELP: &str = "
 usage:
 for install: minstall -i or --install <package_name>
 for search package: minstall -s  or --search <package_name>
 ";
 
-async fn search_package(package: String) -> Result<Vec<(String, String)>, reqwest::Error> {
+#[derive(Debug)]
+pub enum MinstallError {
+    ConnexionError,
+    InstallationError,
+    BuildError,
+}
+
+type Error = MinstallError;
+
+async fn search_package(package: String) -> Result<Vec<(String, String)>, Error> {
     let request = format!("{LINUX_FROM_SCRATCH}index.html");
     match reqwest::get(request).await {
         Ok(response) => {
@@ -36,11 +44,11 @@ async fn search_package(package: String) -> Result<Vec<(String, String)>, reqwes
                 })
                 .collect())
         }
-        Err(error) => Err(error),
+        Err(_) => Err(Error::ConnexionError),
     }
 }
 
-async fn install_the_package(link: &str) -> Result<(), reqwest::Error> {
+async fn install_the_package(link: &str) -> Result<(), Error> {
     let link = format!("{LINUX_FROM_SCRATCH}{link}");
     match reqwest::get(link).await {
         Ok(response) => {
@@ -59,29 +67,42 @@ async fn install_the_package(link: &str) -> Result<(), reqwest::Error> {
             if build_command.len() >= 2 {
                 let build = &build_command[0]
                     .split("&amp;&amp;\n")
-                    .map(|c| c.to_string().replace("\n", ""))
+                    .map(|c| c.to_string().replace("\n", "").replace("\\", ""))
                     .collect::<Vec<String>>();
                 let install = &build_command[1];
-
                 println!("try to download: {url}");
-                download_package(url).expect("download failed"); 
+                download_package(url).await.expect("download failed");
+
+                let file_name = {
+                    let urls = url.split("/").collect::<Vec<_>>();
+                    urls[urls.len() - 1]
+                };
+
+                run_command("cd packages")
+                    .expect("failed to change directory to inside the packages directory");
+
+                let tar_cmd = format!("tar -xvf {file_name}");
+                run_command(&tar_cmd).expect("failed to extrat package file");
+
+                let dir = format!("cd {dir}", dir = file_name.replace(".tar.xz", ""));
+                run_command(&dir).expect(
+                    "failed to change the current directory to inside the extract directory",
+                );
 
                 // etap build
                 for cmd in build {
                     if let Err(_) = run_command(&cmd) {
-                        println!("build failed");
-                        exit(1);
+                        return Err(Error::BuildError);
                     }
                 }
                 // install the package
                 if let Err(_) = run_command(&install) {
-                    println!("installation failed");
-                    exit(1);
+                    return Err(Error::InstallationError);
                 }
             }
             Ok(())
         }
-        Err(error) => Err(error),
+        Err(_) => Err(Error::ConnexionError),
     }
 }
 
@@ -92,11 +113,17 @@ async fn cli() {
             match args.as_str() {
                 "-i" | "--install" => match search_package(package).await {
                     Ok(value) => install_the_package(&value[0].1).await.unwrap(),
-                    Err(_) => println!("Connexion Error"),
+                    Err(err) => eprintln!("{err:?}"),
                 },
-                "-s" | "--search" => match search_package(package).await {
-                    Ok(value) => println!("{}", value[0].0),
-                    Err(_) => println!("Connexion Error"),
+                "-s" | "--search" => match search_package(package.clone()).await {
+                    Ok(value) => {
+                        if let Some(result) = value.get(0) {
+                            println!("{r}", r = result.0);
+                        } else {
+                            println!("the package {package} is not Found");
+                        }
+                    }
+                    Err(err) => eprintln!("{err:?}"),
                 },
                 _ => println!("{HELP}"),
             }
