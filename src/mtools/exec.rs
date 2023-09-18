@@ -5,17 +5,17 @@ use std::path::Path;
 
 pub fn chdir(path: &str) -> bool {
     let root = Path::new(path);
-    env::set_current_dir(&root).is_ok()
+    env::set_current_dir(root).is_ok()
 }
 
 pub fn prepare(cmd: &str) -> (&str, Vec<&str>) {
     let list_cmd = cmd
-        .split(" ")
+        .split(' ')
         .filter(|c| !(c.to_string().is_empty()))
         .collect::<Vec<&str>>();
     let mut args: Vec<&str> = Vec::new();
-    for i in 1..list_cmd.len() {
-        args.push(list_cmd[i])
+    for command in list_cmd.iter().skip(1) {
+        args.push(command)
     }
     (list_cmd[0], args)
 }

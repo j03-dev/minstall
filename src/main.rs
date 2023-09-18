@@ -6,12 +6,41 @@ use crate::mtools::{downloader::download_package, exec::run_command, parse::pars
 
 mod mtools;
 
-static LINUX_FROM_SCRATCH: &str = "https://www.linuxfromscratch.org/blfs/view/svn/";
+static LINUX_FROM_SCRATCH: &str = "https://www.linuxfromscratch.org/blfs/view/svn";
 static HELP: &str = "
 usage:
 for install: minstall -i or --install <package_name>
 for search package: minstall -s  or --search <package_name>
 ";
+
+
+fn levenshtein_distance(s1: &str, s2: &str) -> usize {
+    let len1 = s1.chars().count();
+    let len2 = s2.chars().count();
+
+    let mut matrix: Vec<Vec<usize>> = vec![vec![0; len2 + 1]; len1 + 1];
+
+    for i in 0..=len1 {
+        matrix[i][0] = i;
+    }
+
+    for j in 0..=len2 {
+        matrix[0][j] = j;
+    }
+
+    for (i, char1) in s1.chars().enumerate() {
+        for (j, char2) in s2.chars().enumerate() {
+            let cost = if char1 == char2 { 0 } else { 1 };
+
+            matrix[i + 1][j + 1] = std::cmp::min(
+                matrix[i][j + 1] + 1,
+                std::cmp::min(matrix[i + 1][j] + 1, matrix[i][j] + cost),
+            );
+        }
+    }
+
+    matrix[len1][len2]
+}
 
 #[derive(Debug)]
 pub enum MinstallError {
@@ -22,8 +51,8 @@ pub enum MinstallError {
 
 type Error = MinstallError;
 
-async fn search_package(package: String) -> Result<Vec<(String, String)>, Error> {
-    let request = format!("{LINUX_FROM_SCRATCH}index.html");
+async fn search_package(package: String, distance: usize) -> Result<Vec<(String, String)>, Error> {
+    let request = format!("{LINUX_FROM_SCRATCH}/index.html");
     match reqwest::get(request).await {
         Ok(response) => {
             let r = response.text().await.unwrap();
@@ -39,8 +68,8 @@ async fn search_package(package: String) -> Result<Vec<(String, String)>, Error>
                 .into_iter()
                 .zip(link_to_package)
                 .filter(|(name, _link)| {
-                    let package_name = name.split("-").collect::<Vec<&str>>()[0].to_string();
-                    package_name.to_lowercase() == package.to_lowercase()
+                    let package_name = name.split('-').collect::<Vec<&str>>()[0].to_string();
+                    levenshtein_distance(&package_name.to_lowercase(), &package.to_lowercase()) <= distance
                 })
                 .collect())
         }
@@ -49,7 +78,7 @@ async fn search_package(package: String) -> Result<Vec<(String, String)>, Error>
 }
 
 async fn install_the_package(link: &str) -> Result<(), Error> {
-    let link = format!("{LINUX_FROM_SCRATCH}{link}");
+    let link = format!("{LINUX_FROM_SCRATCH}/{link}");
     match reqwest::get(link).await {
         Ok(response) => {
             let r = response.text().await.unwrap();
@@ -67,14 +96,14 @@ async fn install_the_package(link: &str) -> Result<(), Error> {
             if build_command.len() >= 2 {
                 let build = &build_command[0]
                     .split("&amp;&amp;\n")
-                    .map(|c| c.to_string().replace("\n", "").replace("\\", ""))
+                    .map(|c| c.to_string().replace(['\n','\\'], ""))
                     .collect::<Vec<String>>();
                 let install = &build_command[1];
                 println!("try to download: {url}");
                 download_package(url).await.expect("download failed");
 
                 let file_name = {
-                    let urls = url.split("/").collect::<Vec<_>>();
+                    let urls = url.split('/').collect::<Vec<_>>();
                     urls[urls.len() - 1]
                 };
 
@@ -91,12 +120,12 @@ async fn install_the_package(link: &str) -> Result<(), Error> {
 
                 // etap build
                 for cmd in build {
-                    if let Err(_) = run_command(&cmd) {
+                    if run_command(cmd).is_err() {
                         return Err(Error::BuildError);
                     }
                 }
                 // install the package
-                if let Err(_) = run_command(&install) {
+                if run_command(install).is_err() {
                     return Err(Error::InstallationError);
                 }
             }
@@ -111,16 +140,20 @@ async fn cli() {
         Ok(output) => {
             let (args, package) = output;
             match args.as_str() {
-                "-i" | "--install" => match search_package(package).await {
-                    Ok(value) => install_the_package(&value[0].1).await.unwrap(),
+                "-i" | "--install" => match search_package(package.clone(), 0).await {
+                    Ok(value) => {
+                        if let Some(v) = value.get(0) {
+                            install_the_package(&v.1).await.unwrap()
+                        } else {
+                            println!("Package '{package}' was not found")
+                        }
+                    },
                     Err(err) => eprintln!("{err:?}"),
                 },
-                "-s" | "--search" => match search_package(package.clone()).await {
+                "-s" | "--search" => match search_package(package.clone(), 2).await {
                     Ok(value) => {
-                        if let Some(result) = value.get(0) {
-                            println!("{r}", r = result.0);
-                        } else {
-                            println!("the package {package} is not Found");
+                        for result in value {
+                            println!("{r} => {LINUX_FROM_SCRATCH}/{l}", r = result.0, l = result.1);
                         }
                     }
                     Err(err) => eprintln!("{err:?}"),
