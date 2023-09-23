@@ -20,9 +20,9 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 
     let mut matrix: Vec<Vec<usize>> = vec![vec![0; len2 + 1]; len1 + 1];
 
-    for i in 0..=len1 {
+    (0..=len1).for_each(|i| {
         matrix[i][0] = i;
-    }
+    });
 
     for j in 0..=len2 {
         matrix[0][j] = j;
@@ -99,12 +99,13 @@ async fn install_the_package(link: &str) -> Result<(), Error> {
                     .map(|c| c.to_string().replace(['\n','\\'], ""))
                     .collect::<Vec<String>>();
                 let install = &build_command[1];
+
                 println!("try to download: {url}");
                 download_package(url).await.expect("download failed");
 
                 let file_name = {
                     let urls = url.split('/').collect::<Vec<_>>();
-                    urls[urls.len() - 1]
+                    urls.last().unwrap().to_string()
                 };
 
                 run_command("cd packages")
