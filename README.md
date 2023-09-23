@@ -1,20 +1,27 @@
-Make my own package manager
+# Make my own package manager
 
-# Build
+## Description
+This is a simple package manager for my own use. It is written in rust and it is not yet complete.
+
+## Install rust if not yet install
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+## Build
 ```sh
 git clone https://github.com/j03-dev/minstall
 cd minstall
 ./build.sh
 ```
 
-
-# how to use
+## How to use
 ### for search package
 ```bash
-target/debug/minstall -s <package-name>
+target/release/minstall -s <package-name>
 ```
 
 ### for install package
 ```bash
-target/debug/minstall -i <package-name>
+target/release/minstall -i <package-name>
 ```
